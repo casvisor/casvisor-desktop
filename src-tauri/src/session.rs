@@ -39,20 +39,21 @@ pub async fn serve(state: Arc<State>, channel: Channel<Msg>) -> Result<()> {
         return Ok(());
     };
 
-    let accepted = if state.config().unattended {
-        true
+    let consent = if state.config().unattended {
+        Ok(true)
     } else {
         tokio::select! {
-            accepted = state.request_consent(guard.id) => accepted,
+            consent = state.request_consent(guard.id) => consent,
             _ = wait_closed(&mut reader) => return Ok(()),
         }
     };
+    let accepted = consent == Ok(true);
     let accept = Accept {
         accepted,
-        message: if accepted {
-            String::new()
-        } else {
-            "The person at the remote computer didn't allow the session.".into()
+        message: match consent {
+            Ok(true) => String::new(),
+            Ok(false) => "The person at the remote computer didn't allow the session.".into(),
+            Err(reason) => reason,
         },
     };
     protocol::write_raw(
@@ -140,6 +141,13 @@ fn handle(capture: &Capture, kind: u8, payload: &[u8], paste: bool) {
             match control.kind.as_str() {
                 "keyframe" => capture.command(Command::KeyFrame),
                 "display" => capture.command(Command::Display(control.index)),
+                "ctrl-alt-del" => {
+                    tokio::spawn(async {
+                        if let Err(err) = crate::platform::send_ctrl_alt_del().await {
+                            log::info!("can't send Ctrl+Alt+Del: {err:#}");
+                        }
+                    });
+                }
                 _ => {}
             }
         }

@@ -1,9 +1,12 @@
 mod clipboard;
 mod convert;
+mod desktop;
 mod dpapi;
 mod dxgi;
 mod encoder;
 mod input;
+pub mod pipe;
+pub mod service;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -20,7 +23,7 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorInfo, CURSORINFO, CURSOR_SHOWING};
 
-pub use dpapi::{protect, unprotect};
+pub use dpapi::{protect, restrict_to_admins, unprotect};
 use input::Geometry;
 
 use crate::h264;
@@ -40,9 +43,14 @@ pub enum Command {
     Stop,
 }
 
+enum Input {
+    Mouse(Mouse),
+    Key(Key),
+}
+
 pub struct Capture {
     commands: Sender<Command>,
-    geometry: Arc<Mutex<Geometry>>,
+    input: Sender<Input>,
     clipboard_seq: Arc<AtomicU32>,
 }
 
@@ -74,9 +82,24 @@ impl Capture {
                 }
             })?;
 
+        // Input goes through a thread of its own, which follows the input
+        // desktop: SendInput only reaches the desktop the thread is on.
+        let (input, input_rx) = std::sync::mpsc::channel::<Input>();
+        std::thread::Builder::new()
+            .name("input".into())
+            .spawn(move || {
+                while let Ok(event) = input_rx.recv() {
+                    desktop::follow_input_desktop();
+                    match event {
+                        Input::Mouse(m) => input::mouse(m, *geometry.lock().unwrap()),
+                        Input::Key(k) => input::key(k),
+                    }
+                }
+            })?;
+
         Ok(Capture {
             commands,
-            geometry,
+            input,
             clipboard_seq,
         })
     }
@@ -86,12 +109,11 @@ impl Capture {
     }
 
     pub fn mouse(&self, m: Mouse) {
-        let geometry = *self.geometry.lock().unwrap();
-        input::mouse(m, geometry);
+        let _ = self.input.send(Input::Mouse(m));
     }
 
     pub fn key(&self, k: Key) {
-        input::key(k);
+        let _ = self.input.send(Input::Key(k));
     }
 
     pub fn set_clipboard(&self, text: &str) {
@@ -140,6 +162,9 @@ fn run(
     let mut last_displays = Vec::new();
 
     'outer: loop {
+        // The lock screen, the sign-in screen and UAC prompts are on the
+        // "Winlogon" desktop, which only SYSTEM can join.
+        let _ = desktop::attach_input_desktop();
         let outputs = dxgi::outputs()?;
         if outputs.is_empty() {
             anyhow::bail!("no display");

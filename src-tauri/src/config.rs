@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use base64::engine::general_purpose::STANDARD;
@@ -33,22 +34,39 @@ struct StoredConfig {
     unattended: bool,
 }
 
-pub fn dir() -> PathBuf {
-    let base = std::env::var_os("APPDATA")
-        .or_else(|| std::env::var_os("XDG_CONFIG_HOME"))
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join("Casvisor Desktop")
+/// Where the settings are: the user's own when the app runs the agent itself,
+/// the machine's when the service does, readable only by SYSTEM and administrators.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    User,
+    Machine,
 }
 
-fn path() -> PathBuf {
-    dir().join("config.json")
+pub fn dir(scope: Scope) -> PathBuf {
+    let base = match scope {
+        Scope::User => std::env::var_os("APPDATA")
+            .or_else(|| std::env::var_os("XDG_CONFIG_HOME"))
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))),
+        Scope::Machine => std::env::var_os("ProgramData").map(PathBuf::from),
+    };
+    base.unwrap_or_else(|| PathBuf::from("."))
+        .join("Casvisor Desktop")
+}
+
+fn path(scope: Scope) -> PathBuf {
+    dir(scope).join("config.json")
+}
+
+pub fn modified(scope: Scope) -> Option<SystemTime> {
+    std::fs::metadata(path(scope))
+        .and_then(|m| m.modified())
+        .ok()
 }
 
 impl Config {
-    pub fn load() -> Config {
-        let stored: StoredConfig = std::fs::read(path())
+    pub fn load(scope: Scope) -> Config {
+        let stored: StoredConfig = std::fs::read(path(scope))
             .ok()
             .and_then(|data| serde_json::from_slice(&data).ok())
             .unwrap_or_default();
@@ -56,7 +74,7 @@ impl Config {
         let token = STANDARD
             .decode(stored.protected_token.as_bytes())
             .ok()
-            .and_then(|data| platform::unprotect(&data).ok())
+            .and_then(|data| platform::unprotect(&data, scope == Scope::Machine).ok())
             .and_then(|data| String::from_utf8(data).ok())
             .unwrap_or_default();
 
@@ -68,16 +86,20 @@ impl Config {
         }
     }
 
-    pub fn save(&self) -> Result<()> {
-        let protected = platform::protect(self.token.as_bytes())?;
+    pub fn save(&self, scope: Scope) -> Result<()> {
+        let protected = platform::protect(self.token.as_bytes(), scope == Scope::Machine)?;
         let stored = StoredConfig {
             server: self.server.trim().to_string(),
             fingerprint: self.fingerprint.trim().to_string(),
             protected_token: STANDARD.encode(protected),
             unattended: self.unattended,
         };
-        std::fs::create_dir_all(dir()).context("failed to create the config directory")?;
-        std::fs::write(path(), serde_json::to_vec_pretty(&stored)?)
+        let dir = dir(scope);
+        std::fs::create_dir_all(&dir).context("failed to create the config directory")?;
+        if scope == Scope::Machine {
+            platform::restrict_to_admins(&dir)?;
+        }
+        std::fs::write(path(scope), serde_json::to_vec_pretty(&stored)?)
             .context("failed to write the config")?;
         Ok(())
     }

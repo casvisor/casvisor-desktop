@@ -61,15 +61,29 @@ export default function App() {
   const [unattended, setUnattended] = useState(false);
   const [message, setMessage] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (snapshot && !loaded) {
-      setServer(snapshot.server);
-      setFingerprint(snapshot.fingerprint);
-      setUnattended(snapshot.unattended);
+    if (snapshot && !loaded && (!snapshot.service || snapshot.config.server)) {
+      setServer(snapshot.config.server);
+      setFingerprint(snapshot.config.fingerprint);
+      setUnattended(snapshot.config.unattended);
       setLoaded(true);
     }
   }, [snapshot, loaded]);
+
+  const run = async (action: () => Promise<void>, done: string, asksAdmin: boolean) => {
+    setMessage(asksAdmin ? t("working") : "");
+    setBusy(true);
+    try {
+      await action();
+      setMessage(done);
+    } catch (e) {
+      setMessage(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (!snapshot) {
     return null;
@@ -78,16 +92,15 @@ export default function App() {
   const { status, session } = snapshot;
   const statusText = t(status.state, { server: status.server });
 
-  const save = async () => {
-    setMessage("");
-    try {
-      await api.saveSettings({ server, fingerprint, token, unattended });
-      setToken("");
-      setMessage(t("saved"));
-    } catch (e) {
-      setMessage(String(e));
-    }
-  };
+  const save = () =>
+    run(
+      async () => {
+        await api.saveSettings({ server, fingerprint, token, unattended });
+        setToken("");
+      },
+      t("saved"),
+      snapshot.service,
+    );
 
   const input =
     "mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-950";
@@ -134,7 +147,7 @@ export default function App() {
             className={input}
             type="password"
             value={token}
-            placeholder={snapshot.hasToken ? t("tokenSaved") : "cva_…"}
+            placeholder={snapshot.config.hasToken ? t("tokenSaved") : "cva_…"}
             onChange={(e) => setToken(e.target.value)}
           />
         </label>
@@ -147,11 +160,27 @@ export default function App() {
           {t("unattended")}
         </label>
         <div className="mt-4 flex items-center gap-3">
-          <button className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700" onClick={save}>
+          <button
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            disabled={busy}
+            onClick={save}
+          >
             {t("save")}
           </button>
-          {message && <span className="text-xs text-gray-500">{message}</span>}
+          {message && <span className="text-xs break-words text-gray-500">{message}</span>}
         </div>
+      </section>
+
+      <section className="rounded-xl bg-white p-4 shadow-sm dark:bg-zinc-900">
+        <h2 className="text-sm font-semibold">{t("service")}</h2>
+        <p className="mt-2 text-xs text-gray-500">{t(snapshot.service ? "serviceOn" : "serviceOff")}</p>
+        <button
+          className="mt-3 rounded-md border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          disabled={busy}
+          onClick={() => run(snapshot.service ? api.uninstallService : api.installService, "", true)}
+        >
+          {t(snapshot.service ? "uninstallService" : "installService")}
+        </button>
       </section>
 
       {session && !session.accepted && <Consent session={session} />}

@@ -12,6 +12,10 @@ body,
   margin: 0;
 }
 
+body.banner {
+  overflow: hidden;
+}
+
 body {
   background: #f6f7f9;
   color: #111827;

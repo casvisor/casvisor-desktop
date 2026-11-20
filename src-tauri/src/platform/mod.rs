@@ -2,10 +2,19 @@
 mod windows;
 
 #[cfg(windows)]
-pub use self::windows::{init, protect, unprotect, Capture, Command};
+pub use self::windows::{
+    init, pipe, protect, restrict_to_admins, service, unprotect, Capture, Command,
+};
+
+#[cfg(windows)]
+pub async fn send_ctrl_alt_del() -> anyhow::Result<()> {
+    service::send_ctrl_alt_del().await
+}
 
 #[cfg(not(windows))]
 mod unsupported {
+    use std::path::Path;
+
     use anyhow::{bail, Result};
     use tokio::sync::mpsc;
 
@@ -13,12 +22,20 @@ mod unsupported {
 
     pub fn init() {}
 
-    pub fn protect(data: &[u8]) -> Result<Vec<u8>> {
+    pub fn protect(data: &[u8], _machine: bool) -> Result<Vec<u8>> {
         Ok(data.to_vec())
     }
 
-    pub fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
+    pub fn unprotect(data: &[u8], _machine: bool) -> Result<Vec<u8>> {
         Ok(data.to_vec())
+    }
+
+    pub fn restrict_to_admins(_dir: &Path) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn send_ctrl_alt_del() -> Result<()> {
+        bail!("Ctrl+Alt+Del is only for Windows")
     }
 
     pub enum Command {
@@ -45,4 +62,6 @@ mod unsupported {
 }
 
 #[cfg(not(windows))]
-pub use unsupported::{init, protect, unprotect, Capture, Command};
+pub use unsupported::{
+    init, protect, restrict_to_admins, send_ctrl_alt_del, unprotect, Capture, Command,
+};

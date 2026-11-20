@@ -30,6 +30,9 @@ tauri-plugin-single-instance = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.62"
 features = [
@@ -41,6 +44,8 @@ features = [
     "Win32_Graphics_Gdi",
     "Win32_Media_MediaFoundation",
     "Win32_Security",
+    "Win32_Security_Authentication_Identity",
+    "Win32_Security_Authorization",
     "Win32_Security_Cryptography",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
@@ -48,10 +53,14 @@ features = [
     "Win32_System_Variant",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
     "Win32_System_StationsAndDesktops",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]

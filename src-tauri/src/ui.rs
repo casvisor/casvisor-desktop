@@ -1,6 +1,6 @@
-use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
-use crate::state::SessionInfo;
+use crate::state::{ConfigView, Frontend, SessionInfo, Status};
 
 const BANNER: &str = "banner";
 const BANNER_WIDTH: f64 = 460.0;
@@ -16,14 +16,13 @@ pub fn show_main(app: &AppHandle) {
 
 /// Keeps a bar on top of everything saying who is controlling the computer,
 /// with a button to end it.
-pub fn show_banner(app: Option<&AppHandle>, info: &SessionInfo) {
-    let Some(app) = app else { return };
+fn show_banner(app: &AppHandle, info: &SessionInfo) {
     if let Some(window) = app.get_webview_window(BANNER) {
         let _ = window.show();
         return;
     }
 
-    let url = WebviewUrl::App("index.html#banner".into());
+    let url = WebviewUrl::App("index.html".into());
     let window = WebviewWindowBuilder::new(app, BANNER, url)
         .title(format!("{} is controlling this computer", info.name()))
         .inner_size(BANNER_WIDTH, BANNER_HEIGHT)
@@ -46,9 +45,36 @@ pub fn show_banner(app: Option<&AppHandle>, info: &SessionInfo) {
     }
 }
 
-pub fn hide_banner(app: Option<&AppHandle>) {
-    let Some(app) = app else { return };
+fn hide_banner(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(BANNER) {
         let _ = window.close();
+    }
+}
+
+/// The app's own windows.
+pub struct TauriFrontend {
+    pub app: AppHandle,
+}
+
+impl Frontend for TauriFrontend {
+    fn status(&self, status: &Status) {
+        let _ = self.app.emit("status", status);
+    }
+
+    fn session(&self, session: Option<&SessionInfo>) {
+        let _ = self.app.emit("session", session);
+        match session {
+            Some(info) if info.accepted => show_banner(&self.app, info),
+            _ => hide_banner(&self.app),
+        }
+    }
+
+    fn ask(&self, _session: &SessionInfo) -> Result<(), String> {
+        show_main(&self.app);
+        Ok(())
+    }
+
+    fn config(&self, config: &ConfigView) {
+        let _ = self.app.emit("config", config);
     }
 }
